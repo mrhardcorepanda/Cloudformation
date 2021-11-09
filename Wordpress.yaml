@@ -1,0 +1,462 @@
+---
+Resources:
+  myInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+      - Key: Name
+        Value: !Ref 'AWS::StackName'
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref myInternetGateway
+      VpcId: !Ref myVPC
+  myVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPCCIDR
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Ref AWS::StackName
+  Subnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [0, !Ref WebAZ]
+      VpcId: !Ref myVPC
+      CidrBlock: !Select [0, !Ref Subnets]
+      Tags: 
+        - Key: Name
+          Value: !Join
+            - ''
+            - - 'Net'
+              - !Ref 'AWS::StackName'
+              - ' Web Subnet1'
+    DependsOn: 
+      - myVPC
+  Subnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [1, !Ref WebAZ]
+      VpcId: !Ref myVPC
+      CidrBlock: !Select [1, !Ref Subnets]
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ''
+            - - 'Net'
+              - !Ref 'AWS::StackName'
+              - ' Web Subnet2'
+    DependsOn: 
+      - myVPC
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [0, !Ref WebAZ]
+      VpcId: !Ref myVPC
+      CidrBlock: !Select [2, !Ref Subnets]
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ''
+            - - 'Net'
+              - !Ref 'AWS::StackName'
+              - ' OPS Subnet'
+    DependsOn: 
+      - myVPC
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [1, !Ref WebAZ]
+      VpcId: !Ref myVPC
+      CidrBlock: !Select [3, !Ref Subnets]
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ''
+            - - 'Net'
+              - !Ref 'AWS::StackName'
+              - ' OPS Subnet'
+    DependsOn: 
+      - myVPC
+  NatIp:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+  MyNatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties: 
+      AllocationId: !GetAtt NatIp.AllocationId
+      ConnectivityType: public
+      SubnetId: !Ref PublicSubnet1
+    DependsOn: 
+      - NatIp
+      - PublicSubnet1
+  WebSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: WebSG
+      GroupDescription: WebSG
+      VpcId: !Ref myVPC
+      Tags:
+        - Key: Name
+          Value: !Join
+          - ''
+          - - 'Net'
+            - !Ref 'AWS::StackName'
+            - ' Web SG'
+  ELBSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: ELBSG
+      GroupDescription: ELBSG
+      VpcId: !Ref myVPC
+      SecurityGroupEgress:
+          DestinationSecurityGroupId: !Ref WebSG
+          FromPort: 8080
+          ToPort: 8080
+          IpProtocol: tcp
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          FromPort: 8080
+          ToPort: 8080
+          IpProtocol: tcp
+      Tags:
+        - Key: Name
+          Value: !Join
+          - ''
+          - - 'Net'
+            - !Ref 'AWS::StackName'
+            - ' ELB SG'
+    DependsOn: WebSG
+  DBASG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: DBASG
+      GroupDescription: DBASG
+      VpcId: !Ref myVPC
+      Tags:
+        - Key: Name
+          Value: !Join
+          - ''
+          - - 'Net'
+            - !Ref 'AWS::StackName'
+            - ' DBA SG'
+  OpsSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: OpsSG
+      GroupDescription: OpsSg
+      VpcId: !Ref myVPC
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          FromPort: 22
+          ToPort: 22
+          IpProtocol: tcp
+      Tags:
+        - Key: Name
+          Value: !Join
+          - ''
+          - - 'Net'
+            - !Ref 'AWS::StackName'
+            - ' Ops SG'
+  EFSSG:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn: WebSG
+    Properties:
+      VpcId: !Ref myVPC
+      GroupName: EFSSG
+      GroupDescription: EFSSG
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 2049
+        ToPort: 2049
+        CidrIp: 0.0.0.0/0
+  SecurityGroupRule1:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref DBASG
+      SourceSecurityGroupId: !Ref WebSG
+      FromPort: 3306
+      ToPort: 3306
+      IpProtocol: tcp
+  SecurityGroupRule:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref WebSG
+      DestinationSecurityGroupId: !Ref DBASG
+      FromPort: 3306
+      ToPort: 3306
+      IpProtocol: tcp
+    DependsOn: DBASG
+  SecurityGroupRule2:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref WebSG
+      SourceSecurityGroupId: !Ref ELBSG
+      FromPort: 8080
+      ToPort: 8080
+      IpProtocol: tcp
+    DependsOn: 
+      - ELBSG
+      - WebSG
+  SecurityGroupRule3:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref WebSG
+      SourceSecurityGroupId: !Ref OpsSG
+      FromPort: 22
+      ToPort: 22
+      IpProtocol: tcp
+  SecurityGroupRule4:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref WebSG
+      DestinationSecurityGroupId: !Ref EFSSG
+      FromPort: 2049
+      ToPort: 2049
+      IpProtocol: tcp
+    DependsOn: EFSSG
+  SecurityGroupRule5:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref WebSG
+      IpProtocol: -1
+      CidrIp: 0.0.0.0/0
+    DependsOn: EFSSG
+  SecurityGroupRule6:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref WebSG
+      DestinationSecurityGroupId: !Ref EFSSG
+      FromPort: 0
+      ToPort: 2049
+      IpProtocol: tcp
+    DependsOn: EFSSG
+  MyPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref myVPC
+      Tags:
+        - Key: Name
+          Value: RouteTablePublic
+  MyPrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref myVPC
+      Tags:
+        - Key: Name
+          Value: RouteTablePrivate
+  routeTableAssoc1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref Subnet1
+      RouteTableId: !Ref MyPrivateRouteTable
+  routeTableAssoc2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref Subnet2
+      RouteTableId: !Ref MyPrivateRouteTable
+  routeTableAssoc3:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref MyPublicRouteTable
+  routeTableAssoc4:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref MyPublicRouteTable
+  routePublic:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref MyPublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref myInternetGateway
+  routeNat:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref MyPrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref MyNatGateway
+    DependsOn:
+      - MyNatGateway
+  Jump:
+    Type: AWS::EC2::Instance
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      InstanceType: !Ref JumpInstanceType
+      ImageId: !Ref AMI
+      KeyName: !Ref KeyName
+      SecurityGroupIds: 
+        - !Ref OpsSG
+        - !Ref WebSG
+      UserData: !Base64
+        'Fn::Join':
+          - ''
+          - - |-
+              #!/bin/bash
+              mkdir /mnt/efs
+              mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport 
+            - !GetAtt EFSMountPoint.IpAddress
+            - |
+              :/ /mnt/efs
+              yum install -y git
+              git clone https://github.com/WordPress/WordPress.git /mnt/efs/
+  EFS:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      Encrypted: True
+      PerformanceMode: generalPurpose
+  EFSMountPoint1:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref EFS
+      SubnetId: !Ref Subnet2
+      SecurityGroups:
+      - !Ref EFSSG
+  EFSMountPoint:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref EFS
+      SubnetId: !Ref Subnet1
+      SecurityGroups:
+      - !Ref EFSSG
+  rdsDBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: DBA SUBNET GROUP
+      SubnetIds:
+        - !Ref Subnet1
+        - !Ref Subnet2
+  MyDB:
+    Type: 'AWS::RDS::DBInstance'
+    Properties:
+      DBName: Wordpress
+      DBInstanceIdentifier: !Ref 'AWS::StackName'
+      Engine: MySQL
+      EngineVersion: 8.0.16
+      MasterUsername: Wordpress
+      MasterUserPassword: !Ref DBPASS
+      DBInstanceClass: !Ref DBInstanceType
+      DBSubnetGroupName: !Ref rdsDBSubnetGroup
+      AllocatedStorage: 20
+      AvailabilityZone: !Select [1, !Ref WebAZ]
+      VPCSecurityGroups: 
+        - !Ref DBASG
+  WordpressASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: Wordpress
+      VPCZoneIdentifier:
+        - !Ref Subnet1
+        - !Ref Subnet2
+      LaunchConfigurationName: !Ref WordpressLC
+      MaxSize: 10
+      MinSize: 0
+      DesiredCapacity: !Ref Capacity
+      TargetGroupARNs: 
+        - !Ref WebTG
+  WordpressLC:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      EbsOptimized: false
+      ImageId: !Ref AMI
+      InstanceType: !Ref WebInstanceType
+      KeyName: !Ref KeyName
+      SecurityGroups: 
+        - !Ref WebSG
+      UserData: 
+        Fn::Base64: !Sub
+          - |
+            #!/bin/bash
+            mkdir /mnt/efs
+            mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport ${EFSMountPoint} :/ /mnt/efs
+            yum install -y docker
+            service docker start
+            docker run --name wordpress -p 8080:80 -d -e WORDPRESS_DB_HOST=${MyDB} -e WORDPRESS_DB_USER=Wordpress -e WORDPRESS_DB_NAME=Wordpress -e WORDPRESS_DB_PASSWORD=${DBPassword} --mount type=bind,source=/mnt/efs,target=/var/www/html wordpress
+          - MyDB: !GetAtt MyDB.Endpoint.Address
+            EFSMountPoint: !GetAtt EFSMountPoint.IpAddress
+            DBPassword: !Ref DBPASS
+    DependsOn: MyDB
+  ELB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      SecurityGroups: 
+        - !Ref ELBSG
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      Scheme: internet-facing
+    DependsOn:
+      - VPCGatewayAttachment
+      - WordpressASG
+  ELBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ELB
+      Port: 8080
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref WebTG
+  WebTG:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /
+      HealthCheckPort: 8080
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 3
+      Port: 8080
+      Protocol: HTTP
+      VpcId: !Ref myVPC
+      Matcher:
+        HttpCode: 200-302
+Parameters:
+  Capacity:
+    Type: String
+    Default: 2
+    Description: Count of Wordpress instances
+  DBInstanceType:
+    Description: Instace Type for RDS
+    Default: db.t2.micro
+    Type: String
+  DBPASS:
+    Description: Password for database
+    Type: String
+    NoEcho: true
+    Default: Password
+  VPCCIDR:
+    Description: CIDR block for VPC
+    Type: String
+    Default: 10.0.0.0/16
+  Subnets:
+    Description: 4 CIDR Blocks for Subnets 2 private 2 public
+    Type: CommaDelimitedList
+    Default: 10.0.1.0/24,10.0.2.0/24,10.0.3.0/24,10.0.4.0/24
+  WebAZ:
+    Description: Two availability zones for Web
+    Type: List<AWS::EC2::AvailabilityZone::Name>
+  JumpInstanceType:
+    Description: Instance type for jump station
+    Type: String
+    Default: t2.micro
+  WebInstanceType:
+    Description: Instance type for web station
+    Type: String
+    Default: t2.micro
+  AMI:
+    Description: AMI
+    Type: String
+  KeyName:
+    Description: Name of ssh key
+    Type: String
+    Default: Test
+Outputs:
+  ELB:
+    Value: !GetAtt ELB.DNSName
+    Description: ELB endpoint port 8080
